@@ -755,7 +755,7 @@ This is currently a personal project. Contributions, suggestions, and feedback a
 
 ```bash
 # Clone repository
-git clone <your-repo>
+git clone https://github.com/ffeew/autostock-trader
 cd autostock-trader
 
 # Create development environment
