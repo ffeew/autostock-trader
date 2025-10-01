@@ -34,14 +34,35 @@ class BasicLSTM(BaseModel):
             batch_first=True
         )
 
+        # Add explicit dropout layer (active even with single layer)
+        self.dropout = nn.Dropout(dropout)
+
         self.fc = nn.Linear(hidden_size, 1)
+
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+            elif 'fc' in name and 'weight' in name:
+                nn.init.xavier_uniform_(param.data)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x shape: (batch_size, sequence_length, input_size)
         lstm_out, _ = self.lstm(x)
         # Take output from last time step
         last_output = lstm_out[:, -1, :]
+        # Apply dropout
+        last_output = self.dropout(last_output)
         # Predict
         output = self.fc(last_output)
         return output
@@ -75,7 +96,23 @@ class StackedLSTM(BaseModel):
             nn.Linear(hidden_size // 2, 1)
         )
 
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+            elif 'weight' in name and ('fc' in name or 'Linear' in str(type(self))):
+                if param.dim() >= 2:
+                    nn.init.xavier_uniform_(param.data)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lstm_out, _ = self.lstm(x)
@@ -106,13 +143,34 @@ class BidirectionalLSTM(BaseModel):
             bidirectional=True
         )
 
+        # Add explicit dropout layer
+        self.dropout = nn.Dropout(dropout)
+
         # Bidirectional doubles the hidden size
         self.fc = nn.Linear(hidden_size * 2, 1)
+
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+            elif 'fc' in name and 'weight' in name:
+                nn.init.xavier_uniform_(param.data)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lstm_out, _ = self.lstm(x)
         last_output = lstm_out[:, -1, :]
+        # Apply dropout
+        last_output = self.dropout(last_output)
         output = self.fc(last_output)
         return output
 

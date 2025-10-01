@@ -202,7 +202,7 @@ class StockDataLoader:
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
-            shuffle=True,  # Shuffle within batches, but time order preserved in sequences
+            shuffle=False,  # NO shuffling for time series - preserves temporal order
             num_workers=0,  # Use 0 for compatibility
             pin_memory=True
         )

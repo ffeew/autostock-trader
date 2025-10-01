@@ -145,7 +145,7 @@ class BaseModel(ABC, nn.Module):
         train_loader: DataLoader,
         val_loader: DataLoader,
         epochs: int = 50,
-        learning_rate: float = 0.001,
+        learning_rate: float = 0.0005,
         early_stopping_patience: int = 10,
         save_path: Optional[str] = None,
         tensorboard_log_dir: Optional[str] = None
@@ -178,6 +178,15 @@ class BaseModel(ABC, nn.Module):
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
 
+        # Add learning rate scheduler
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=0.5,
+            patience=5,
+            min_lr=1e-6
+        )
+
         patience_counter = 0
 
         for epoch in range(epochs):
@@ -191,11 +200,17 @@ class BaseModel(ABC, nn.Module):
 
             self.epochs_trained += 1
 
+            # Step the learning rate scheduler
+            scheduler.step(val_loss)
+
+            # Get current learning rate
+            current_lr = optimizer.param_groups[0]['lr']
+
             # TensorBoard logging
             if writer:
                 writer.add_scalar('Loss/train', train_loss, epoch)
                 writer.add_scalar('Loss/validation', val_loss, epoch)
-                writer.add_scalar('Learning_Rate', learning_rate, epoch)
+                writer.add_scalar('Learning_Rate', current_lr, epoch)
 
                 # Log gradient norms
                 total_norm = 0
