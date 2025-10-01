@@ -9,6 +9,7 @@ import sys
 import argparse
 import logging
 from typing import Dict, List
+from datetime import datetime
 import torch
 from dotenv import load_dotenv
 
@@ -38,6 +39,7 @@ def train_single_model(
     learning_rate: float = 0.001,
     early_stopping_patience: int = 10,
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+    tensorboard_log_dir: str = None,
     **model_kwargs
 ) -> Dict:
     """
@@ -89,7 +91,8 @@ def train_single_model(
         epochs=epochs,
         learning_rate=learning_rate,
         early_stopping_patience=early_stopping_patience,
-        save_path=save_path
+        save_path=save_path,
+        tensorboard_log_dir=tensorboard_log_dir
     )
 
     logger.info(f"✓ Training completed for {model_family}-{model_type}")
@@ -161,6 +164,11 @@ def main():
         default=['all'],
         help='Models to train (e.g., lstm:basic gru:residual) or "all"'
     )
+    parser.add_argument(
+        '--tensorboard',
+        action='store_true',
+        help='Enable TensorBoard logging for training visualization'
+    )
 
     args = parser.parse_args()
 
@@ -215,6 +223,17 @@ def main():
 
     logger.info(f"Training {len(models_to_train)} model(s)")
 
+    # TensorBoard setup
+    if args.tensorboard:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        tensorboard_base_dir = f'runs/{timestamp}'
+        logger.info(f"\n✓ TensorBoard logging enabled")
+        logger.info(f"  Log directory: {tensorboard_base_dir}")
+        logger.info(f"  View with: tensorboard --logdir=runs")
+        logger.info(f"  Then open: http://localhost:6006\n")
+    else:
+        tensorboard_base_dir = None
+
     # Common model kwargs
     model_kwargs = {
         'hidden_size': args.hidden_size,
@@ -226,6 +245,12 @@ def main():
     results = {}
     for family, model_type in models_to_train:
         try:
+            # Create TensorBoard log directory for this model
+            tb_log_dir = None
+            if tensorboard_base_dir:
+                tb_log_dir = os.path.join(tensorboard_base_dir, f'{family}_{model_type}')
+                os.makedirs(tb_log_dir, exist_ok=True)
+
             history = train_single_model(
                 model_family=family,
                 model_type=model_type,
@@ -236,6 +261,7 @@ def main():
                 learning_rate=args.learning_rate,
                 early_stopping_patience=args.early_stopping,
                 device=device,
+                tensorboard_log_dir=tb_log_dir,
                 **model_kwargs
             )
 

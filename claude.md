@@ -223,8 +223,11 @@ autostock-trader/
 # Train all models
 python train_models.py
 
+# Train with TensorBoard (recommended)
+python train_models.py --tensorboard
+
 # Train specific models
-python train_models.py --models lstm:attention gru:residual
+python train_models.py --models lstm:attention gru:residual --tensorboard
 
 # Evaluate with ensemble
 python evaluate_models.py --evaluate-ensemble
@@ -232,6 +235,23 @@ python evaluate_models.py --evaluate-ensemble
 # Quick test
 python test_models.py
 ```
+
+**TensorBoard Integration:**
+
+Training visualization is now fully integrated via TensorBoard:
+
+- **Enable with**: `--tensorboard` flag during training
+- **View with**: `python view_tensorboard.py` or `tensorboard --logdir=runs`
+- **Logs tracked**: Training/validation loss, learning rate, gradient norms, weight histograms
+- **Benefits**: Real-time monitoring, early detection of overfitting, model comparison
+- **Directory structure**: `runs/{timestamp}/{model_family}_{model_type}/`
+
+The base model automatically logs:
+- Scalar metrics: Loss curves, learning rate, gradient norms
+- Histograms: Model weights and gradients (every 10 epochs)
+- Best validation loss tracking
+
+All models inherit this functionality, no additional code needed.
 
 ### Action Decision Models (To Be Implemented)
 
@@ -272,6 +292,7 @@ pyarrow>=21.0.0         # Parquet file support
 
 # Machine Learning (Phase 2)
 torch>=2.0.0            # PyTorch deep learning framework
+tensorboard>=2.18.0     # Training visualization dashboard
 scikit-learn>=1.3.0     # ML utilities (scaling, metrics)
 optuna>=3.0.0           # Hyperparameter optimization
 matplotlib>=3.8.0       # Plotting and visualization
@@ -437,11 +458,19 @@ python test_models.py
 # Train all models
 python train_models.py
 
+# Train with TensorBoard visualization (recommended!)
+python train_models.py --tensorboard
+
 # Train specific models
-python train_models.py --models lstm:basic gru:residual
+python train_models.py --models lstm:basic gru:residual --tensorboard
 
 # Train with custom hyperparameters
-python train_models.py --epochs 100 --batch-size 64 --learning-rate 0.001 --hidden-size 256
+python train_models.py --epochs 100 --batch-size 64 --learning-rate 0.001 --hidden-size 256 --tensorboard
+
+# View TensorBoard (in separate terminal while training)
+python view_tensorboard.py
+# Or manually: tensorboard --logdir=runs
+# Open browser: http://localhost:6006
 
 # Evaluate all trained models
 python evaluate_models.py
@@ -458,6 +487,7 @@ python -c "from src.models.lstm_models import BasicLSTM; model = BasicLSTM(77, 1
 # View training results
 ls -lh models/checkpoints/*/
 ls -lh models/plots/
+ls -lh runs/  # TensorBoard logs
 ```
 
 ## Future Development Roadmap

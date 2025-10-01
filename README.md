@@ -165,6 +165,9 @@ Date range: 2024-10-01 to 2024-12-31
 # Train all model architectures (10 models)
 python train_models.py
 
+# Train with TensorBoard visualization (recommended!)
+python train_models.py --tensorboard
+
 # Train specific models only
 python train_models.py --models lstm:basic gru:residual tcn:multiscale
 
@@ -174,7 +177,8 @@ python train_models.py \
     --batch-size 64 \
     --learning-rate 0.001 \
     --hidden-size 256 \
-    --early-stopping 15
+    --early-stopping 15 \
+    --tensorboard
 ```
 
 **Available models**:
@@ -211,6 +215,30 @@ python evaluate_models.py --evaluate-ensemble
 # Test all models with 2 epochs (fast verification)
 python test_models.py
 ```
+
+### TensorBoard Visualization
+
+**Monitor training in real-time:**
+
+```bash
+# 1. Start training with TensorBoard logging
+python train_models.py --tensorboard
+
+# 2. In a separate terminal, launch TensorBoard
+python view_tensorboard.py
+
+# Or manually:
+tensorboard --logdir=runs
+```
+
+Then open your browser to **http://localhost:6006**
+
+**Features:**
+- 📈 Real-time loss curves (train vs validation)
+- 📊 Gradient flow analysis
+- 🔍 Weight/bias distributions
+- 🔄 Compare multiple models side-by-side
+- 💾 Export visualizations
 
 ---
 

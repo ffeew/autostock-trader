@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO)
@@ -146,7 +147,8 @@ class BaseModel(ABC, nn.Module):
         epochs: int = 50,
         learning_rate: float = 0.001,
         early_stopping_patience: int = 10,
-        save_path: Optional[str] = None
+        save_path: Optional[str] = None,
+        tensorboard_log_dir: Optional[str] = None
     ) -> Dict[str, List[float]]:
         """
         Train the model.
@@ -158,12 +160,20 @@ class BaseModel(ABC, nn.Module):
             learning_rate: Learning rate
             early_stopping_patience: Patience for early stopping
             save_path: Path to save best model
+            tensorboard_log_dir: Directory for TensorBoard logs (optional)
 
         Returns:
             Dictionary with training history
         """
         logger.info(f"Training {self.__class__.__name__} on {self.device}")
         logger.info(f"Epochs: {epochs}, LR: {learning_rate}")
+
+        # Initialize TensorBoard writer if log directory provided
+        writer = None
+        if tensorboard_log_dir:
+            writer = SummaryWriter(log_dir=tensorboard_log_dir)
+            logger.info(f"TensorBoard logging enabled: {tensorboard_log_dir}")
+            logger.info("View with: tensorboard --logdir=runs")
 
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
@@ -181,6 +191,28 @@ class BaseModel(ABC, nn.Module):
 
             self.epochs_trained += 1
 
+            # TensorBoard logging
+            if writer:
+                writer.add_scalar('Loss/train', train_loss, epoch)
+                writer.add_scalar('Loss/validation', val_loss, epoch)
+                writer.add_scalar('Learning_Rate', learning_rate, epoch)
+
+                # Log gradient norms
+                total_norm = 0
+                for p in self.parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2)
+                        total_norm += param_norm.item() ** 2
+                total_norm = total_norm ** 0.5
+                writer.add_scalar('Gradient/norm', total_norm, epoch)
+
+                # Log model weights histograms every 10 epochs
+                if epoch % 10 == 0:
+                    for name, param in self.named_parameters():
+                        writer.add_histogram(f'Weights/{name}', param, epoch)
+                        if param.grad is not None:
+                            writer.add_histogram(f'Gradients/{name}', param.grad, epoch)
+
             logger.info(
                 f"Epoch {epoch+1}/{epochs} - "
                 f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}"
@@ -190,6 +222,10 @@ class BaseModel(ABC, nn.Module):
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 patience_counter = 0
+
+                # Log best model to TensorBoard
+                if writer:
+                    writer.add_scalar('Best_Val_Loss', val_loss, epoch)
 
                 # Save best model
                 if save_path:
@@ -203,6 +239,10 @@ class BaseModel(ABC, nn.Module):
                 break
 
         logger.info(f"Training completed. Best val loss: {self.best_val_loss:.6f}")
+
+        # Close TensorBoard writer
+        if writer:
+            writer.close()
 
         return {
             'train_losses': self.train_losses,
