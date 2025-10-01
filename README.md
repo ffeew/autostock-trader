@@ -5,6 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Data Pipeline](https://img.shields.io/badge/Phase%201-Complete-brightgreen.svg)](https://github.com)
+[![Prediction Models](https://img.shields.io/badge/Phase%202-Complete-brightgreen.svg)](https://github.com)
 
 ## 🎯 Overview
 
@@ -14,9 +15,9 @@ AutoStock Trader is an AI-powered trading system that combines:
 - **🤖 Dual-Model Architecture**: Separate models for price prediction and action decision-making
 - **📊 Rich Feature Engineering**: 78 technical indicators per time step
 - **🎲 Ensemble Methods**: Multiple model architectures working together
-- **📉 Market Sentiment Integration**: High-beta index (QQQ) correlation signals
+- **📉 QQQ Market Windvane**: High-beta QQQ features (0.8053 correlation) as market sentiment indicators
 
-**Current Status**: Phase 1 (Data Pipeline) is complete with **1.67M rows** of minute-level data from 2016-2025.
+**Current Status**: Phase 1 (Data Pipeline) & Phase 2 (Prediction Models) are complete with **1.67M rows** of minute-level data from 2016-2025 and **10 model architectures** ready for training.
 
 ---
 
@@ -27,17 +28,19 @@ AutoStock Trader is an AI-powered trading system that combines:
 - ✅ Alpaca API integration for real-time and historical data
 - ✅ Minute-level data fetching (2016-2025: 1,674,536 bars)
 - ✅ 78 technical indicators automatically calculated
-- ✅ Market sentiment features (QQQ correlation)
+- ✅ **QQQ windvane features** (7 features: returns, RSI, volatility, correlation)
+- ✅ Strong QQQ-SPY correlation (0.8053) validates market sentiment hypothesis
 - ✅ Multiple timeframe support (Minute, Hour, Day, Week, Month)
 - ✅ Efficient storage (Parquet format: ~600 MB for 1.67M rows)
 
-### Prediction Models (🔜 **PLANNED**)
+### Prediction Models (✅ **COMPLETE**)
 
-- 🔜 LSTM with attention mechanisms
-- 🔜 GRU with residual connections
-- 🔜 Temporal Convolutional Networks (TCN)
-- 🔜 Transformer models with positional encoding
-- 🔜 Weighted and adaptive ensembles
+- ✅ LSTM variants (Basic, Stacked, Bidirectional, Attention)
+- ✅ GRU variants (Basic, Residual, BatchNorm)
+- ✅ Temporal Convolutional Networks (Basic, MultiScale, Residual TCN)
+- ✅ Transformer models (Basic, MultiHead, Informer-inspired)
+- ✅ Ensemble methods (Simple averaging, Weighted, Stacking)
+- ✅ Training & evaluation framework with early stopping
 - 🔜 Hyperparameter optimization (Optuna)
 
 ### Action Decision Models (🔜 **PLANNED**)
@@ -151,6 +154,67 @@ Date range: 2024-10-01 to 2024-12-31
 ```
 
 ---
+
+# <<<<<<< Updated upstream
+
+## 🤖 Training Models (Phase 2)
+
+### Train All Models
+
+```bash
+# Train all model architectures (10 models)
+python train_models.py
+
+# Train specific models only
+python train_models.py --models lstm:basic gru:residual tcn:multiscale
+
+# Customize training parameters
+python train_models.py \
+    --epochs 100 \
+    --batch-size 64 \
+    --learning-rate 0.001 \
+    --hidden-size 256 \
+    --early-stopping 15
+```
+
+**Available models**:
+
+- LSTM: `basic`, `stacked`, `bidirectional`, `attention`
+- GRU: `basic`, `residual`, `batchnorm`
+- TCN: `basic`, `multiscale`, `residual`
+- Transformer: `basic`, `multihead`, `informer`
+
+### Evaluate Models
+
+```bash
+# Evaluate all trained models
+python evaluate_models.py
+
+# Evaluate specific models
+python evaluate_models.py --models lstm:attention gru:residual
+
+# Include ensemble evaluation
+python evaluate_models.py --evaluate-ensemble
+```
+
+**Output includes**:
+
+- Test set metrics (RMSE, MAE, Directional Accuracy)
+- Prediction vs actual plots
+- Residual analysis
+- Model comparison charts
+- Results saved to `models/plots/`
+
+### Quick Test
+
+```bash
+# Test all models with 2 epochs (fast verification)
+python test_models.py
+```
+
+---
+
+> > > > > > > Stashed changes
 
 ## 📊 Current Dataset
 

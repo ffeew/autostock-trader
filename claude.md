@@ -62,11 +62,26 @@ autostock-trader/
 │   ├── data/
 │   │   ├── fetcher.py          # Alpaca API integration
 │   │   └── features.py         # Technical indicator calculation
+│   ├── models/
+│   │   ├── base_model.py       # Abstract base class for all models
+│   │   ├── data_loader.py      # Time series data preparation
+│   │   ├── lstm_models.py      # LSTM variants (4 models)
+│   │   ├── gru_models.py       # GRU variants (3 models)
+│   │   ├── tcn_models.py       # TCN variants (3 models)
+│   │   ├── transformer_models.py # Transformer variants (3 models)
+│   │   └── ensemble.py         # Ensemble methods (3 types)
 │   └── __init__.py
+├── models/
+│   ├── checkpoints/             # Saved model weights
+│   ├── plots/                   # Evaluation visualizations
+│   └── logs/                    # Training logs
 ├── data/                        # Generated datasets (gitignored)
 ├── logs/                        # Application logs
 ├── venv/                        # Python virtual environment
-├── generate_dataset.py          # Main pipeline orchestrator
+├── generate_dataset.py          # Data pipeline orchestrator
+├── train_models.py              # Model training script
+├── evaluate_models.py           # Model evaluation script
+├── test_models.py               # Model testing script
 ├── verify_setup.py              # Setup validation script
 ├── requirements.txt             # Python dependencies
 ├── .env                         # API credentials (gitignored)
@@ -156,21 +171,67 @@ autostock-trader/
 - **Cause**: Too many rapid API requests
 - **Solution**: Add delays between requests OR reduce symbol count
 
-## Model Development Notes (Future)
+## Model Development Notes
 
-### Prediction Models (To Be Implemented)
+### Prediction Models (Phase 2 - COMPLETE)
 
-**Time Series Models:**
-- LSTM: Good for long-term dependencies
-- GRU: More efficient than LSTM, similar performance
-- TCN: Parallel processing, good for minute data
-- Transformers: Attention mechanism, best for complex patterns
+**Implemented Model Architectures:**
 
-**Key Considerations:**
-- Input shape: (batch_size, sequence_length, 78 features)
-- Sequence length: 30-60 minutes for minute-level predictions
-- Output: Next N steps (PREDICTION_STEPS=30)
-- Validation: Use time-based splits, NOT random splits
+1. **LSTM Models (4 variants)** - `src/models/lstm_models.py`
+   - BasicLSTM: Standard LSTM for sequence modeling
+   - StackedLSTM: Deep multi-layer LSTM with dropout
+   - BidirectionalLSTM: Processes sequences in both directions
+   - AttentionLSTM: LSTM with attention mechanism for focusing on important time steps
+
+2. **GRU Models (3 variants)** - `src/models/gru_models.py`
+   - BasicGRU: Efficient alternative to LSTM
+   - ResidualGRU: GRU with residual connections and layer normalization
+   - BatchNormGRU: GRU with batch normalization for stable training
+
+3. **TCN Models (3 variants)** - `src/models/tcn_models.py`
+   - BasicTCN: Temporal Convolutional Network with dilated causal convolutions
+   - MultiScaleTCN: Parallel TCNs with different kernel sizes (3, 5, 7)
+   - ResidualTCN: TCN with skip connections between blocks
+
+4. **Transformer Models (3 variants)** - `src/models/transformer_models.py`
+   - BasicTransformer: Standard transformer with causal masking
+   - MultiHeadTransformer: Pre-LN transformer with multiple attention heads
+   - InformerTransformer: Informer-inspired with distilling operation
+
+5. **Ensemble Methods (3 types)** - `src/models/ensemble.py`
+   - SimpleEnsemble: Averages predictions from multiple models
+   - WeightedEnsemble: Optimizes weights based on validation performance
+   - StackingEnsemble: Meta-learner trained on base model predictions
+
+**Key Implementation Details:**
+- Base class: `src/models/base_model.py` (abstract class with common methods)
+- Data loader: `src/models/data_loader.py` (time series sequence generation)
+- Input shape: (batch_size, sequence_length=60, input_features=77)
+- Target: SPY price 30 minutes ahead (configurable via PREDICTION_STEPS)
+- Validation: Time-based splits (70/15/15 train/val/test), NOT random splits
+- Early stopping with configurable patience
+- Model checkpointing (saves best model during training)
+- Metrics: MSE, RMSE, MAE, Directional Accuracy
+
+**Training & Evaluation Scripts:**
+- `train_models.py`: Train all or specific models with customizable hyperparameters
+- `evaluate_models.py`: Comprehensive evaluation with visualizations
+- `test_models.py`: Quick verification of all model architectures
+
+**Usage Examples:**
+```bash
+# Train all models
+python train_models.py
+
+# Train specific models
+python train_models.py --models lstm:attention gru:residual
+
+# Evaluate with ensemble
+python evaluate_models.py --evaluate-ensemble
+
+# Quick test
+python test_models.py
+```
 
 ### Action Decision Models (To Be Implemented)
 
@@ -201,12 +262,22 @@ autostock-trader/
 
 **Core Libraries:**
 ```
+# Data Pipeline
 alpaca-py>=0.42.2      # Alpaca API SDK
 pandas>=2.3.3           # Data manipulation
 numpy>=2.3.3            # Numerical computing
 ta>=0.11.0              # Technical analysis indicators
 python-dotenv>=1.1.1    # Environment management
 pyarrow>=21.0.0         # Parquet file support
+
+# Machine Learning (Phase 2)
+torch>=2.0.0            # PyTorch deep learning framework
+scikit-learn>=1.3.0     # ML utilities (scaling, metrics)
+optuna>=3.0.0           # Hyperparameter optimization
+matplotlib>=3.8.0       # Plotting and visualization
+seaborn>=0.13.0         # Statistical visualizations
+tqdm>=4.66.0            # Progress bars
+scipy>=1.11.0           # Scientific computing
 ```
 
 **When Adding Dependencies:**
@@ -336,6 +407,8 @@ test: Add unit tests for fetcher
 source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
 
+# Phase 1: Data Pipeline
+# ----------------------
 # Verify setup
 python verify_setup.py
 
@@ -355,6 +428,36 @@ python -c "import pandas as pd; df = pd.read_parquet('data/SPY_features.parquet'
 
 # Check memory usage
 python -c "import pandas as pd; df = pd.read_parquet('data/SPY_features.parquet'); print(f'{df.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB')"
+
+# Phase 2: Model Training & Evaluation
+# -------------------------------------
+# Quick test all models (2 epochs)
+python test_models.py
+
+# Train all models
+python train_models.py
+
+# Train specific models
+python train_models.py --models lstm:basic gru:residual
+
+# Train with custom hyperparameters
+python train_models.py --epochs 100 --batch-size 64 --learning-rate 0.001 --hidden-size 256
+
+# Evaluate all trained models
+python evaluate_models.py
+
+# Evaluate with ensemble
+python evaluate_models.py --evaluate-ensemble
+
+# Evaluate specific models
+python evaluate_models.py --models lstm:attention gru:residual
+
+# Check model parameters
+python -c "from src.models.lstm_models import BasicLSTM; model = BasicLSTM(77, 128); print(f'{model.count_parameters():,} parameters')"
+
+# View training results
+ls -lh models/checkpoints/*/
+ls -lh models/plots/
 ```
 
 ## Future Development Roadmap
@@ -365,12 +468,13 @@ python -c "import pandas as pd; df = pd.read_parquet('data/SPY_features.parquet'
 - [x] 78 technical indicators
 - [x] Market sentiment features
 
-### Phase 2: Prediction Models (NEXT)
-- [ ] LSTM implementation
-- [ ] GRU/RNN variants
-- [ ] TCN implementation
-- [ ] Transformer models
-- [ ] Ensemble methods
+### Phase 2: Prediction Models ✅ (COMPLETE)
+- [x] LSTM implementation (4 variants: Basic, Stacked, Bidirectional, Attention)
+- [x] GRU variants (3 variants: Basic, Residual, BatchNorm)
+- [x] TCN implementation (3 variants: Basic, MultiScale, Residual)
+- [x] Transformer models (3 variants: Basic, MultiHead, Informer)
+- [x] Ensemble methods (Simple, Weighted, Stacking)
+- [x] Training & evaluation framework
 - [ ] Hyperparameter optimization (Optuna)
 
 ### Phase 3: Action Models
@@ -401,7 +505,9 @@ python -c "import pandas as pd; df = pd.read_parquet('data/SPY_features.parquet'
 
 ---
 
-**Last Updated**: 2024-12-30
-**Dataset Version**: v1.0 (Minute-level, 78 features)
+**Last Updated**: 2025-01-10
+**Dataset Version**: v1.0 (Minute-level, 78 features, 1.67M rows)
+**Models Version**: v1.0 (10 architectures + 3 ensembles)
 **Python Version**: 3.12+
+**PyTorch Version**: 2.0+
 **Alpaca API Version**: alpaca-py 0.42.2
