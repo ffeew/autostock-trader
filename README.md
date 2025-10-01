@@ -72,7 +72,7 @@ AutoStock Trader is an AI-powered trading system that combines:
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/ffeew/autostock-trader
 cd autostock-trader
 
 # Create virtual environment
@@ -234,6 +234,7 @@ tensorboard --logdir=runs
 Then open your browser to **http://localhost:6006**
 
 **Features:**
+
 - 📈 Real-time loss curves (train vs validation)
 - 📊 Gradient flow analysis
 - 🔍 Weight/bias distributions
