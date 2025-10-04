@@ -108,7 +108,8 @@ class BaseModel(ABC, nn.Module):
             # Update the target feature (assumed to be last or specific column)
             # For simplicity, we update all features with the prediction
             # In practice, only the 'close' price should be updated
-            next_features[:, -1] = pred.squeeze(-1)  # Update last feature
+            # CRITICAL: Detach prediction when feeding back to prevent gradient issues
+            next_features[:, -1] = pred.squeeze(-1).detach()  # Update last feature
 
             # Slide window: remove oldest timestep, add new one
             next_features = next_features.unsqueeze(1)  # (batch, 1, n_features)
