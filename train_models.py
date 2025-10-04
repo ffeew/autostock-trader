@@ -172,6 +172,30 @@ def main():
 
     args = parser.parse_args()
 
+    # Setup logging to file
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_dir = 'logs'
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f'training_{timestamp}.log')
+
+    # Configure logging to both file and console
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+    # Get root logger and add handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.handlers = []  # Clear existing handlers
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+    logger.info(f"Logging to: {log_file}")
+
     # Load environment
     load_dotenv()
 
@@ -190,13 +214,14 @@ def main():
         batch_size=args.batch_size
     )
 
-    train_loader, val_loader, test_loader, scaler = data_loader.prepare_data()
+    train_loader, val_loader, test_loader, scaler, target_scaler = data_loader.prepare_data()
     input_size = data_loader.n_features
 
     logger.info(f"✓ Data loaded successfully")
     logger.info(f"  Input features: {input_size}")
     logger.info(f"  Sequence length: {args.sequence_length}")
-    logger.info(f"  Batch size: {args.batch_size}\n")
+    logger.info(f"  Batch size: {args.batch_size}")
+    logger.info(f"  Target normalization: ENABLED (mean=0, std=1)\n")
 
     # Model configurations
     model_configs = {

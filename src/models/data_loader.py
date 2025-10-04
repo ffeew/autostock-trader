@@ -103,6 +103,7 @@ class StockDataLoader:
             logger.info(f"Using PREDICTION_STEPS from .env: {self.prediction_steps}")
 
         self.scaler = StandardScaler()
+        self.target_scaler = StandardScaler()  # Add scaler for target variable
         self.feature_columns = None
         self.n_features = None
 
@@ -124,7 +125,7 @@ class StockDataLoader:
 
     def prepare_data(
         self
-    ) -> Tuple[DataLoader, DataLoader, DataLoader, StandardScaler]:
+    ) -> Tuple[DataLoader, DataLoader, DataLoader, StandardScaler, StandardScaler]:
         """
         Prepare data for training.
 
@@ -132,7 +133,8 @@ class StockDataLoader:
             train_loader: Training data loader
             val_loader: Validation data loader
             test_loader: Test data loader
-            scaler: Fitted scaler for inverse transform
+            scaler: Fitted scaler for features inverse transform
+            target_scaler: Fitted scaler for target inverse transform
         """
         # Load data
         df = self.load_data()
@@ -180,12 +182,21 @@ class StockDataLoader:
         # Fit scaler on training data only
         self.scaler.fit(train_features)
 
+        # Fit target scaler on training targets only
+        self.target_scaler.fit(train_targets.reshape(-1, 1))
+
         # Transform all datasets
         train_features = self.scaler.transform(train_features)
         val_features = self.scaler.transform(val_features)
         test_features = self.scaler.transform(test_features)
 
+        # Transform targets (CRITICAL: normalize target variable)
+        train_targets = self.target_scaler.transform(train_targets.reshape(-1, 1)).flatten()
+        val_targets = self.target_scaler.transform(val_targets.reshape(-1, 1)).flatten()
+        test_targets = self.target_scaler.transform(test_targets.reshape(-1, 1)).flatten()
+
         logger.info("Data normalized using StandardScaler")
+        logger.info("Target variable normalized (mean=0, std=1)")
 
         # Create PyTorch datasets
         train_dataset = TimeSeriesDataset(
@@ -228,11 +239,11 @@ class StockDataLoader:
         logger.info(f"Val batches:   {len(val_loader)}")
         logger.info(f"Test batches:  {len(test_loader)}")
 
-        return train_loader, val_loader, test_loader, self.scaler
+        return train_loader, val_loader, test_loader, self.scaler, self.target_scaler
 
     def get_sample_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get a single batch for testing model architecture."""
-        train_loader, _, _, _ = self.prepare_data()
+        train_loader, _, _, _, _ = self.prepare_data()
         x, y = next(iter(train_loader))
         logger.info(f"Sample batch shapes: X={x.shape}, Y={y.shape}")
         return x, y
@@ -251,7 +262,7 @@ def test_data_loader():
     )
 
     # Prepare data
-    train_loader, val_loader, test_loader, scaler = loader.prepare_data()
+    train_loader, val_loader, test_loader, scaler, target_scaler = loader.prepare_data()
 
     # Get sample batch
     x, y = next(iter(train_loader))

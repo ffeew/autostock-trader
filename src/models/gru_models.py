@@ -31,12 +31,33 @@ class BasicGRU(BaseModel):
             batch_first=True
         )
 
+        # Add explicit dropout layer (active even with single layer)
+        self.dropout = nn.Dropout(dropout)
+
         self.fc = nn.Linear(hidden_size, 1)
+
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+            elif 'fc' in name and 'weight' in name:
+                nn.init.xavier_uniform_(param.data)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gru_out, _ = self.gru(x)
         last_output = gru_out[:, -1, :]
+        # Apply dropout
+        last_output = self.dropout(last_output)
         output = self.fc(last_output)
         return output
 
@@ -77,7 +98,22 @@ class ResidualGRU(BaseModel):
             nn.Linear(hidden_size // 2, 1)
         )
 
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+            elif 'weight' in name and param.dim() >= 2:
+                nn.init.xavier_uniform_(param.data)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Project input
@@ -129,7 +165,22 @@ class BatchNormGRU(BaseModel):
             nn.Linear(hidden_size // 2, 1)
         )
 
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+            elif 'weight' in name and param.dim() >= 2:
+                nn.init.xavier_uniform_(param.data)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gru_out, _ = self.gru(x)

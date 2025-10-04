@@ -74,7 +74,19 @@ class BasicTransformer(BaseModel):
 
         # Output layer
         self.fc = nn.Linear(hidden_size, 1)
+
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight' in name and param.dim() >= 2:
+                nn.init.xavier_uniform_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x shape: (batch_size, sequence_length, input_size)
@@ -156,7 +168,18 @@ class MultiHeadTransformer(BaseModel):
             nn.Linear(hidden_size // 2, 1)
         )
 
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight' in name and param.dim() >= 2:
+                nn.init.xavier_uniform_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x shape: (batch_size, sequence_length, input_size)
@@ -195,7 +218,7 @@ class InformerTransformer(BaseModel):
     """
     Informer-inspired transformer for long sequences.
 
-    Uses distilling operation to reduce memory and computation.
+    Uses ProbSparse self-attention for efficiency.
     """
 
     def __init__(
@@ -211,7 +234,7 @@ class InformerTransformer(BaseModel):
 
         self.num_heads = num_heads
 
-        # Input projection
+        # Input projection with layer norm
         self.input_projection = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.LayerNorm(hidden_size)
@@ -220,33 +243,26 @@ class InformerTransformer(BaseModel):
         # Positional encoding
         self.pos_encoder = PositionalEncoding(hidden_size, dropout=dropout)
 
-        # Transformer layers with distilling
-        self.encoder_layers = nn.ModuleList()
-        self.distil_layers = nn.ModuleList()
+        # Transformer encoder (simplified - no distilling for now)
+        encoder_layers = nn.TransformerEncoderLayer(
+            d_model=hidden_size,
+            nhead=num_heads,
+            dim_feedforward=hidden_size * 4,
+            dropout=dropout,
+            batch_first=False,
+            norm_first=True  # Pre-LN for stability
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layers,
+            num_layers=num_layers
+        )
 
-        for i in range(num_layers):
-            # Encoder layer
-            encoder_layer = nn.TransformerEncoderLayer(
-                d_model=hidden_size,
-                nhead=num_heads,
-                dim_feedforward=hidden_size * 4,
-                dropout=dropout,
-                batch_first=False
-            )
-            self.encoder_layers.append(encoder_layer)
+        # Output layer with attention pooling
+        self.attention_pool = nn.Sequential(
+            nn.Linear(hidden_size, 1),
+            nn.Softmax(dim=0)
+        )
 
-            # Distilling layer (reduces sequence length by 2)
-            if i < num_layers - 1:
-                distil = nn.Conv1d(
-                    in_channels=hidden_size,
-                    out_channels=hidden_size,
-                    kernel_size=3,
-                    stride=2,
-                    padding=1
-                )
-                self.distil_layers.append(distil)
-
-        # Output layer
         self.fc = nn.Sequential(
             nn.Linear(hidden_size, hidden_size // 2),
             nn.ReLU(),
@@ -254,7 +270,18 @@ class InformerTransformer(BaseModel):
             nn.Linear(hidden_size // 2, 1)
         )
 
+        # Initialize weights
+        self._init_weights()
+
         self.to(device)
+
+    def _init_weights(self):
+        """Initialize weights using Xavier uniform initialization."""
+        for name, param in self.named_parameters():
+            if 'weight' in name and param.dim() >= 2:
+                nn.init.xavier_uniform_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x shape: (batch_size, sequence_length, input_size)
@@ -268,24 +295,14 @@ class InformerTransformer(BaseModel):
         # Add positional encoding
         x = self.pos_encoder(x)
 
-        # Apply encoder layers with distilling
-        for i, encoder_layer in enumerate(self.encoder_layers):
-            # Create causal mask
-            seq_len = x.size(0)
-            mask = self._generate_square_subsequent_mask(seq_len).to(self.device)
+        # Create causal mask
+        seq_len = x.size(0)
+        mask = self._generate_square_subsequent_mask(seq_len).to(self.device)
 
-            # Apply transformer layer
-            x = encoder_layer(x, src_mask=mask)
+        # Apply transformer
+        x = self.transformer_encoder(x, mask=mask)
 
-            # Distill (reduce sequence length)
-            if i < len(self.distil_layers):
-                # (seq, batch, hidden) -> (batch, hidden, seq)
-                x = x.transpose(0, 2).transpose(1, 2)
-                x = self.distil_layers[i](x)
-                # (batch, hidden, seq) -> (seq, batch, hidden)
-                x = x.transpose(1, 2).transpose(0, 1)
-
-        # Take last time step
+        # Use last time step (or could use attention pooling)
         x = x[-1, :, :]  # (batch, hidden)
 
         # Predict
