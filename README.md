@@ -155,13 +155,12 @@ Date range: 2024-10-01 to 2024-12-31
 
 ---
 
-# <<<<<<< Updated upstream
-
 ## 🤖 Training Models (Phase 2)
 
 ### Train All Models
 
 **All models use auto-regressive sequential prediction** (like LLM token generation):
+
 - Predicts 30 timesteps sequentially
 - Each prediction feeds back as input for the next step
 - Loss computed on ALL 30 predictions
@@ -247,8 +246,6 @@ Then open your browser to **http://localhost:6006**
 - 💾 Export visualizations
 
 ---
-
-> > > > > > > Stashed changes
 
 ## 📊 Current Dataset
 
