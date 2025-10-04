@@ -22,9 +22,10 @@ class BasicLSTM(BaseModel):
         hidden_size: int = 128,
         num_layers: int = 1,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.lstm = nn.LSTM(
             input_size=input_size,
@@ -77,9 +78,10 @@ class StackedLSTM(BaseModel):
         hidden_size: int = 128,
         num_layers: int = 3,
         dropout: float = 0.3,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.lstm = nn.LSTM(
             input_size=input_size,
@@ -130,9 +132,10 @@ class BidirectionalLSTM(BaseModel):
         hidden_size: int = 128,
         num_layers: int = 2,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.lstm = nn.LSTM(
             input_size=input_size,
@@ -184,9 +187,10 @@ class AttentionLSTM(BaseModel):
         hidden_size: int = 128,
         num_layers: int = 2,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.lstm = nn.LSTM(
             input_size=input_size,

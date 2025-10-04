@@ -28,7 +28,8 @@ class BaseModel(ABC, nn.Module):
         hidden_size: int,
         num_layers: int = 1,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
         """
         Initialize base model.
@@ -39,6 +40,7 @@ class BaseModel(ABC, nn.Module):
             num_layers: Number of layers
             dropout: Dropout rate
             device: Device to run model on
+            prediction_steps: Number of timesteps to predict (autoregressive)
         """
         super().__init__()
         self.input_size = input_size
@@ -46,6 +48,7 @@ class BaseModel(ABC, nn.Module):
         self.num_layers = num_layers
         self.dropout = dropout
         self.device = device
+        self.prediction_steps = prediction_steps
 
         # Training history
         self.train_losses = []
@@ -65,6 +68,56 @@ class BaseModel(ABC, nn.Module):
             Output tensor of shape (batch_size, 1)
         """
         pass
+
+    def forward_autoregressive(
+        self,
+        x: torch.Tensor,
+        num_steps: int,
+        feature_scaler: 'StandardScaler' = None
+    ) -> torch.Tensor:
+        """
+        Auto-regressive forward pass (like LLM generation).
+
+        Predicts num_steps into the future by feeding predictions back as input.
+
+        Args:
+            x: Input tensor of shape (batch_size, sequence_length, input_size)
+            num_steps: Number of steps to predict ahead
+            feature_scaler: Optional scaler to denormalize/renormalize predictions
+
+        Returns:
+            Predictions of shape (batch_size, num_steps, 1)
+        """
+        batch_size, seq_len, n_features = x.shape
+        predictions = []
+
+        # Current input window
+        current_x = x.clone()
+
+        for step in range(num_steps):
+            # Predict next value
+            with torch.set_grad_enabled(self.training):
+                pred = self.forward(current_x)  # (batch, 1)
+
+            predictions.append(pred)
+
+            # Prepare next input: slide window and append prediction
+            # New feature vector: copy last timestep features, update target column
+            next_features = current_x[:, -1, :].clone()  # (batch, n_features)
+
+            # Update the target feature (assumed to be last or specific column)
+            # For simplicity, we update all features with the prediction
+            # In practice, only the 'close' price should be updated
+            next_features[:, -1] = pred.squeeze(-1)  # Update last feature
+
+            # Slide window: remove oldest timestep, add new one
+            next_features = next_features.unsqueeze(1)  # (batch, 1, n_features)
+            current_x = torch.cat([current_x[:, 1:, :], next_features], dim=1)
+
+        # Stack predictions: (batch, num_steps, 1)
+        predictions = torch.stack(predictions, dim=1)
+
+        return predictions
 
     def train_epoch(
         self,
@@ -93,8 +146,15 @@ class BaseModel(ABC, nn.Module):
 
             # Forward pass
             optimizer.zero_grad()
-            predictions = self(batch_x)
-            loss = criterion(predictions, batch_y)
+
+            # Auto-regressive training: predict multiple steps
+            predictions = self.forward_autoregressive(batch_x, self.prediction_steps)
+            # predictions: (batch, num_steps, 1)
+            # batch_y: (batch, num_steps)
+
+            # Compute loss on ALL predictions (not just final)
+            predictions_flat = predictions.squeeze(-1)  # (batch, num_steps)
+            loss = criterion(predictions_flat, batch_y)
 
             # Backward pass
             loss.backward()
@@ -131,8 +191,14 @@ class BaseModel(ABC, nn.Module):
                 batch_x = batch_x.to(self.device)
                 batch_y = batch_y.to(self.device)
 
-                predictions = self(batch_x)
-                loss = criterion(predictions, batch_y)
+                # Auto-regressive validation: predict multiple steps
+                predictions = self.forward_autoregressive(batch_x, self.prediction_steps)
+                # predictions: (batch, num_steps, 1)
+                # batch_y: (batch, num_steps)
+
+                # Compute loss on ALL predictions (not just final)
+                predictions_flat = predictions.squeeze(-1)  # (batch, num_steps)
+                loss = criterion(predictions_flat, batch_y)
 
                 total_loss += loss.item()
                 n_batches += 1
@@ -167,6 +233,7 @@ class BaseModel(ABC, nn.Module):
         """
         logger.info(f"Training {self.__class__.__name__} on {self.device}")
         logger.info(f"Epochs: {epochs}, LR: {learning_rate}")
+        logger.info(f"Auto-regressive prediction: {self.prediction_steps} steps")
 
         # Initialize TensorBoard writer if log directory provided
         writer = None
@@ -276,8 +343,8 @@ class BaseModel(ABC, nn.Module):
             data_loader: Data loader
 
         Returns:
-            predictions: Predicted values
-            actuals: Actual values
+            predictions: Predicted values (batch, num_steps)
+            actuals: Actual values (batch, num_steps)
         """
         self.eval()
         all_predictions = []
@@ -287,7 +354,9 @@ class BaseModel(ABC, nn.Module):
             for batch_x, batch_y in tqdm(data_loader, desc="Predicting", leave=False):
                 batch_x = batch_x.to(self.device)
 
-                predictions = self(batch_x)
+                # Auto-regressive: predict full sequence
+                predictions = self.forward_autoregressive(batch_x, self.prediction_steps)
+                predictions = predictions.squeeze(-1)  # (batch, num_steps)
 
                 all_predictions.append(predictions.cpu().numpy())
                 all_actuals.append(batch_y.numpy())
@@ -318,9 +387,10 @@ class BaseModel(ABC, nn.Module):
         mae = np.mean(np.abs(predictions - actuals))
 
         # Directional accuracy (did we predict the direction correctly?)
-        # Compute returns
-        pred_returns = np.diff(predictions.flatten())
-        actual_returns = np.diff(actuals.flatten())
+        # For multi-step predictions, compute on final timestep
+        pred_returns = np.diff(predictions[:, -1])
+        actual_returns = np.diff(actuals[:, -1])
+
         directional_accuracy = np.mean(
             np.sign(pred_returns) == np.sign(actual_returns)
         )
@@ -348,6 +418,7 @@ class BaseModel(ABC, nn.Module):
             'hidden_size': self.hidden_size,
             'num_layers': self.num_layers,
             'dropout': self.dropout,
+            'prediction_steps': self.prediction_steps,
             'train_losses': self.train_losses,
             'val_losses': self.val_losses,
             'best_val_loss': self.best_val_loss,
@@ -366,7 +437,8 @@ class BaseModel(ABC, nn.Module):
             hidden_size=checkpoint['hidden_size'],
             num_layers=checkpoint['num_layers'],
             dropout=checkpoint['dropout'],
-            device=device
+            device=device,
+            prediction_steps=checkpoint.get('prediction_steps', 30)
         )
 
         model.load_state_dict(checkpoint['model_state_dict'])

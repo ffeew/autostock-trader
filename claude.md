@@ -207,7 +207,11 @@ autostock-trader/
 - Base class: `src/models/base_model.py` (abstract class with common methods)
 - Data loader: `src/models/data_loader.py` (time series sequence generation)
 - Input shape: (batch_size, sequence_length=60, input_features=77)
-- Target: SPY price 30 minutes ahead (configurable via PREDICTION_STEPS)
+- **Training mode**: Auto-regressive sequential prediction (all models)
+  - Predicts 30 timesteps sequentially (like LLM token generation)
+  - Each prediction feeds back as input for next step
+  - Loss computed on ALL 30 predictions, not just final
+- Target: Sequence of 30 future prices (configurable via PREDICTION_STEPS)
 - Validation: Time-based splits (70/15/15 train/val/test), NOT random splits
 - Early stopping with configurable patience
 - Model checkpointing (saves best model during training)
@@ -220,19 +224,22 @@ autostock-trader/
 
 **Usage Examples:**
 ```bash
-# Train all models
+# Train all models (auto-regressive by default)
 python train_models.py
 
-# Train with TensorBoard (recommended)
+# Train with TensorBoard visualization (recommended)
 python train_models.py --tensorboard
 
 # Train specific models
 python train_models.py --models lstm:attention gru:residual --tensorboard
 
+# Customize training (all models predict 30 steps auto-regressively)
+python train_models.py --epochs 100 --hidden-size 256 --tensorboard
+
 # Evaluate with ensemble
 python evaluate_models.py --evaluate-ensemble
 
-# Quick test
+# Quick test (2 epochs)
 python test_models.py
 ```
 
@@ -464,7 +471,7 @@ python train_models.py --tensorboard
 # Train specific models
 python train_models.py --models lstm:basic gru:residual --tensorboard
 
-# Train with custom hyperparameters
+# Train with custom hyperparameters (all auto-regressive)
 python train_models.py --epochs 100 --batch-size 64 --learning-rate 0.001 --hidden-size 256 --tensorboard
 
 # View TensorBoard (in separate terminal while training)

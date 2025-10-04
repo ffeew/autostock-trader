@@ -30,7 +30,8 @@ class TimeSeriesDataset(Dataset):
         self,
         data: np.ndarray,
         targets: np.ndarray,
-        sequence_length: int
+        sequence_length: int,
+        prediction_steps: int = 30
     ):
         """
         Initialize dataset.
@@ -39,23 +40,31 @@ class TimeSeriesDataset(Dataset):
             data: Feature data (samples, features)
             targets: Target values (samples,)
             sequence_length: Length of input sequences
+            prediction_steps: Number of steps to predict ahead (default: 30)
         """
         self.data = data
         self.targets = targets
         self.sequence_length = sequence_length
+        self.prediction_steps = prediction_steps
 
     def __len__(self) -> int:
-        return len(self.data) - self.sequence_length
+        # Need room for: sequence_length input + prediction_steps output
+        return len(self.data) - self.sequence_length - self.prediction_steps + 1
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Get sequence
+        # Get input sequence
         x = self.data[idx:idx + self.sequence_length]
-        # Get target (prediction_steps ahead from end of sequence)
-        y = self.targets[idx + self.sequence_length]
+
+        # Get target: SEQUENCE of next N values (auto-regressive)
+        # targets[idx + sequence_length] = t+1
+        # targets[idx + sequence_length + prediction_steps - 1] = t+N
+        start_idx = idx + self.sequence_length
+        end_idx = start_idx + self.prediction_steps
+        y = self.targets[start_idx:end_idx]
 
         return (
             torch.FloatTensor(x),
-            torch.FloatTensor([y])
+            torch.FloatTensor(y)  # Shape: (prediction_steps,) e.g., (30,)
         )
 
 
@@ -200,13 +209,13 @@ class StockDataLoader:
 
         # Create PyTorch datasets
         train_dataset = TimeSeriesDataset(
-            train_features, train_targets, self.sequence_length
+            train_features, train_targets, self.sequence_length, self.prediction_steps
         )
         val_dataset = TimeSeriesDataset(
-            val_features, val_targets, self.sequence_length
+            val_features, val_targets, self.sequence_length, self.prediction_steps
         )
         test_dataset = TimeSeriesDataset(
-            test_features, test_targets, self.sequence_length
+            test_features, test_targets, self.sequence_length, self.prediction_steps
         )
 
         # Create data loaders

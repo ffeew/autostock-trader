@@ -161,6 +161,11 @@ Date range: 2024-10-01 to 2024-12-31
 
 ### Train All Models
 
+**All models use auto-regressive sequential prediction** (like LLM token generation):
+- Predicts 30 timesteps sequentially
+- Each prediction feeds back as input for the next step
+- Loss computed on ALL 30 predictions
+
 ```bash
 # Train all model architectures (10 models)
 python train_models.py
@@ -306,30 +311,35 @@ Then open your browser to **http://localhost:6006**
 - Captures long-term dependencies in price movements
 - Variants: Basic, Stacked, Bidirectional
 - Attention mechanisms for focus on important time steps
+- **Auto-regressive**: Predicts 30-step sequences iteratively
 
 **GRU (Gated Recurrent Unit)**:
 
 - More efficient than LSTM with similar performance
 - Enhanced with residual connections
 - Batch normalization for stable training
+- **Auto-regressive**: Sequential 30-step prediction
 
 **TCN (Temporal Convolutional Network)**:
 
 - Parallel processing of sequences
 - Multi-scale receptive fields
 - Excellent for minute-level data
+- **Auto-regressive**: Iterative multi-step forecasting
 
 **Transformer**:
 
 - Self-attention mechanisms
 - Positional encoding for temporal information
 - Causal attention for realistic predictions
+- **Auto-regressive**: Like GPT, predicts sequences step-by-step
 
 **Ensemble Methods**:
 
 - Weighted averaging based on recent performance
 - Regime-aware ensembles (bull/bear/sideways)
 - Stacking with meta-learner
+- **All use auto-regressive base models**
 
 #### 2. Action Decision Models
 

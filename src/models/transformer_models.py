@@ -47,9 +47,10 @@ class BasicTransformer(BaseModel):
         num_layers: int = 4,
         num_heads: int = 8,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.num_heads = num_heads
 
@@ -131,9 +132,10 @@ class MultiHeadTransformer(BaseModel):
         num_layers: int = 6,
         num_heads: int = 8,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.num_heads = num_heads
 
@@ -228,9 +230,10 @@ class InformerTransformer(BaseModel):
         num_layers: int = 4,
         num_heads: int = 8,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.num_heads = num_heads
 

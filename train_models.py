@@ -263,8 +263,15 @@ def main():
     model_kwargs = {
         'hidden_size': args.hidden_size,
         'num_layers': args.num_layers,
-        'dropout': args.dropout
+        'dropout': args.dropout,
+        'prediction_steps': data_loader.prediction_steps
     }
+
+    # Log auto-regressive mode
+    logger.info(f"\n🔄 AUTO-REGRESSIVE TRAINING")
+    logger.info(f"  Prediction steps: {data_loader.prediction_steps}")
+    logger.info(f"  Training: Model will predict {data_loader.prediction_steps} steps iteratively")
+    logger.info(f"  Each prediction feeds back as input for next prediction\n")
 
     # Train each model
     results = {}

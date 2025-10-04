@@ -19,9 +19,10 @@ class BasicGRU(BaseModel):
         hidden_size: int = 128,
         num_layers: int = 2,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.gru = nn.GRU(
             input_size=input_size,
@@ -71,9 +72,10 @@ class ResidualGRU(BaseModel):
         hidden_size: int = 128,
         num_layers: int = 3,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         # Project input to hidden_size for residual connection
         self.input_projection = nn.Linear(input_size, hidden_size)
@@ -141,9 +143,10 @@ class BatchNormGRU(BaseModel):
         hidden_size: int = 128,
         num_layers: int = 2,
         dropout: float = 0.2,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        prediction_steps: int = 30
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
 
         self.gru = nn.GRU(
             input_size=input_size,

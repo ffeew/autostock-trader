@@ -6,3 +6,4 @@ venv/
 /logs
 /runs
 __pycache__
+*.pt
