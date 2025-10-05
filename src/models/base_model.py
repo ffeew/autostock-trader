@@ -52,9 +52,11 @@ class BaseModel(ABC, nn.Module):
 
         # Training history
         self.train_losses = []
+        self.train_losses_ema = []  # Exponential moving average
         self.val_losses = []
         self.best_val_loss = float('inf')
         self.epochs_trained = 0
+        self.ema_alpha = 0.1  # Smoothing factor for EMA
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -124,8 +126,10 @@ class BaseModel(ABC, nn.Module):
         self,
         train_loader: DataLoader,
         criterion: nn.Module,
-        optimizer: torch.optim.Optimizer
-    ) -> float:
+        optimizer: torch.optim.Optimizer,
+        writer: Optional[SummaryWriter] = None,
+        epoch: int = 0
+    ) -> Tuple[float, List[float]]:
         """
         Train for one epoch.
 
@@ -133,15 +137,18 @@ class BaseModel(ABC, nn.Module):
             train_loader: Training data loader
             criterion: Loss function
             optimizer: Optimizer
+            writer: Optional TensorBoard writer for batch-level logging
+            epoch: Current epoch number
 
         Returns:
-            Average training loss for the epoch
+            Tuple of (average training loss, list of batch losses)
         """
         self.train()
         total_loss = 0
         n_batches = 0
+        batch_losses = []
 
-        for batch_x, batch_y in tqdm(train_loader, desc="Training", leave=False):
+        for batch_idx, (batch_x, batch_y) in enumerate(tqdm(train_loader, desc="Training", leave=False)):
             batch_x = batch_x.to(self.device)
             batch_y = batch_y.to(self.device)
 
@@ -162,11 +169,18 @@ class BaseModel(ABC, nn.Module):
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
             optimizer.step()
 
-            total_loss += loss.item()
+            batch_loss = loss.item()
+            total_loss += batch_loss
+            batch_losses.append(batch_loss)
             n_batches += 1
 
+            # Log batch-level metrics to TensorBoard
+            if writer is not None and batch_idx % 10 == 0:
+                global_step = epoch * len(train_loader) + batch_idx
+                writer.add_scalar('Loss/train_batch', batch_loss, global_step)
+
         avg_loss = total_loss / n_batches
-        return avg_loss
+        return avg_loss, batch_losses
 
     def validate(
         self,
@@ -259,8 +273,18 @@ class BaseModel(ABC, nn.Module):
 
         for epoch in range(epochs):
             # Train
-            train_loss = self.train_epoch(train_loader, criterion, optimizer)
+            train_loss, batch_losses = self.train_epoch(
+                train_loader, criterion, optimizer, writer, epoch
+            )
             self.train_losses.append(train_loss)
+
+            # Compute EMA of training loss
+            if len(self.train_losses_ema) == 0:
+                train_loss_ema = train_loss
+            else:
+                train_loss_ema = (self.ema_alpha * train_loss +
+                                 (1 - self.ema_alpha) * self.train_losses_ema[-1])
+            self.train_losses_ema.append(train_loss_ema)
 
             # Validate
             val_loss = self.validate(val_loader, criterion)
@@ -277,8 +301,15 @@ class BaseModel(ABC, nn.Module):
             # TensorBoard logging
             if writer:
                 writer.add_scalar('Loss/train', train_loss, epoch)
+                writer.add_scalar('Loss/train_ema', train_loss_ema, epoch)
                 writer.add_scalar('Loss/validation', val_loss, epoch)
                 writer.add_scalar('Learning_Rate', current_lr, epoch)
+
+                # Log training loss variance
+                batch_loss_variance = np.var(batch_losses)
+                batch_loss_std = np.std(batch_losses)
+                writer.add_scalar('Loss/train_batch_variance', batch_loss_variance, epoch)
+                writer.add_scalar('Loss/train_batch_std', batch_loss_std, epoch)
 
                 # Log gradient norms
                 total_norm = 0
@@ -298,7 +329,8 @@ class BaseModel(ABC, nn.Module):
 
             logger.info(
                 f"Epoch {epoch+1}/{epochs} - "
-                f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}"
+                f"Train Loss: {train_loss:.6f} (EMA: {train_loss_ema:.6f}), "
+                f"Val Loss: {val_loss:.6f}"
             )
 
             # Early stopping
@@ -329,6 +361,7 @@ class BaseModel(ABC, nn.Module):
 
         return {
             'train_losses': self.train_losses,
+            'train_losses_ema': self.train_losses_ema,
             'val_losses': self.val_losses,
             'best_val_loss': self.best_val_loss
         }
@@ -421,6 +454,7 @@ class BaseModel(ABC, nn.Module):
             'dropout': self.dropout,
             'prediction_steps': self.prediction_steps,
             'train_losses': self.train_losses,
+            'train_losses_ema': self.train_losses_ema,
             'val_losses': self.val_losses,
             'best_val_loss': self.best_val_loss,
             'epochs_trained': self.epochs_trained
@@ -444,6 +478,7 @@ class BaseModel(ABC, nn.Module):
 
         model.load_state_dict(checkpoint['model_state_dict'])
         model.train_losses = checkpoint.get('train_losses', [])
+        model.train_losses_ema = checkpoint.get('train_losses_ema', [])
         model.val_losses = checkpoint.get('val_losses', [])
         model.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
         model.epochs_trained = checkpoint.get('epochs_trained', 0)
