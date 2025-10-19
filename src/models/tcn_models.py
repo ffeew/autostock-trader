@@ -83,9 +83,10 @@ class BasicTCN(BaseModel):
         kernel_size: int = 3,
         dropout: float = 0.2,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        prediction_steps: int = 30
+        prediction_steps: int = 30,
+        target_feature_idx: int = 3
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps, target_feature_idx)
 
         layers = []
         num_levels = num_layers
@@ -134,9 +135,10 @@ class MultiScaleTCN(BaseModel):
         kernel_sizes: list = [3, 5, 7],
         dropout: float = 0.2,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        prediction_steps: int = 30
+        prediction_steps: int = 30,
+        target_feature_idx: int = 3
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps, target_feature_idx)
 
         self.scales = nn.ModuleList()
 
@@ -199,9 +201,10 @@ class ResidualTCN(BaseModel):
         kernel_size: int = 3,
         dropout: float = 0.2,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        prediction_steps: int = 30
+        prediction_steps: int = 30,
+        target_feature_idx: int = 3
     ):
-        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps)
+        super().__init__(input_size, hidden_size, num_layers, dropout, device, prediction_steps, target_feature_idx)
 
         # Initial projection
         self.input_projection = nn.Conv1d(input_size, hidden_size, 1)

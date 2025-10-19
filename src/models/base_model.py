@@ -29,7 +29,8 @@ class BaseModel(ABC, nn.Module):
         num_layers: int = 1,
         dropout: float = 0.2,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        prediction_steps: int = 30
+        prediction_steps: int = 30,
+        target_feature_idx: int = 3
     ):
         """
         Initialize base model.
@@ -41,6 +42,7 @@ class BaseModel(ABC, nn.Module):
             dropout: Dropout rate
             device: Device to run model on
             prediction_steps: Number of timesteps to predict (autoregressive)
+            target_feature_idx: Index of target feature for auto-regressive feedback
         """
         super().__init__()
         self.input_size = input_size
@@ -49,6 +51,7 @@ class BaseModel(ABC, nn.Module):
         self.dropout = dropout
         self.device = device
         self.prediction_steps = prediction_steps
+        self.target_feature_idx = target_feature_idx
 
         # Training history
         self.train_losses = []
@@ -75,17 +78,24 @@ class BaseModel(ABC, nn.Module):
         self,
         x: torch.Tensor,
         num_steps: int,
-        feature_scaler: 'StandardScaler' = None
+        target_feature_idx: int = 3,
+        feature_scaler: 'StandardScaler' = None,
+        ground_truth: torch.Tensor = None,
+        teacher_forcing_ratio: float = 0.0
     ) -> torch.Tensor:
         """
-        Auto-regressive forward pass (like LLM generation).
+        Auto-regressive forward pass (like LLM generation) with optional teacher forcing.
 
         Predicts num_steps into the future by feeding predictions back as input.
+        With teacher forcing, uses ground truth values instead of predictions during training.
 
         Args:
             x: Input tensor of shape (batch_size, sequence_length, input_size)
             num_steps: Number of steps to predict ahead
+            target_feature_idx: Index of the target feature (e.g., 'close' price) in the feature array
             feature_scaler: Optional scaler to denormalize/renormalize predictions
+            ground_truth: Ground truth targets of shape (batch_size, num_steps) for teacher forcing
+            teacher_forcing_ratio: Probability [0,1] of using ground truth vs prediction (0=no TF, 1=full TF)
 
         Returns:
             Predictions of shape (batch_size, num_steps, 1)
@@ -96,6 +106,11 @@ class BaseModel(ABC, nn.Module):
         # Current input window
         current_x = x.clone()
 
+        # Determine whether to use teacher forcing for this batch
+        use_teacher_forcing = (self.training and
+                               ground_truth is not None and
+                               teacher_forcing_ratio > 0.0)
+
         for step in range(num_steps):
             # Predict next value
             with torch.set_grad_enabled(self.training):
@@ -103,15 +118,28 @@ class BaseModel(ABC, nn.Module):
 
             predictions.append(pred)
 
-            # Prepare next input: slide window and append prediction
+            # Prepare next input: slide window and append prediction or ground truth
             # New feature vector: copy last timestep features, update target column
             next_features = current_x[:, -1, :].clone()  # (batch, n_features)
 
-            # Update the target feature (assumed to be last or specific column)
-            # For simplicity, we update all features with the prediction
-            # In practice, only the 'close' price should be updated
-            # CRITICAL: Detach prediction when feeding back to prevent gradient issues
-            next_features[:, -1] = pred.squeeze(-1).detach()  # Update last feature
+            # Decide whether to use teacher forcing for this step
+            if use_teacher_forcing:
+                # Randomly decide to use ground truth based on teacher_forcing_ratio
+                use_gt = torch.rand(1).item() < teacher_forcing_ratio
+
+                if use_gt and step < ground_truth.shape[1]:
+                    # Use ground truth value (already normalized)
+                    next_value = ground_truth[:, step].detach()
+                else:
+                    # Use model prediction
+                    next_value = pred.squeeze(-1).detach()
+            else:
+                # No teacher forcing - use model prediction
+                # CRITICAL: Detach prediction when feeding back to prevent gradient issues
+                next_value = pred.squeeze(-1).detach()
+
+            # Update the target feature (e.g., 'close' price) with the chosen value
+            next_features[:, target_feature_idx] = next_value
 
             # Slide window: remove oldest timestep, add new one
             next_features = next_features.unsqueeze(1)  # (batch, 1, n_features)
@@ -128,7 +156,10 @@ class BaseModel(ABC, nn.Module):
         criterion: nn.Module,
         optimizer: torch.optim.Optimizer,
         writer: Optional[SummaryWriter] = None,
-        epoch: int = 0
+        epoch: int = 0,
+        scaler: Optional[torch.amp.GradScaler] = None,
+        use_amp: bool = False,
+        teacher_forcing_ratio: float = 0.0
     ) -> Tuple[float, List[float]]:
         """
         Train for one epoch.
@@ -139,6 +170,9 @@ class BaseModel(ABC, nn.Module):
             optimizer: Optimizer
             writer: Optional TensorBoard writer for batch-level logging
             epoch: Current epoch number
+            scaler: GradScaler for mixed precision training
+            use_amp: Whether to use automatic mixed precision
+            teacher_forcing_ratio: Probability of using ground truth vs prediction (0.0-1.0)
 
         Returns:
             Tuple of (average training loss, list of batch losses)
@@ -152,22 +186,37 @@ class BaseModel(ABC, nn.Module):
             batch_x = batch_x.to(self.device)
             batch_y = batch_y.to(self.device)
 
-            # Forward pass
+            # Forward pass with mixed precision
             optimizer.zero_grad()
 
-            # Auto-regressive training: predict multiple steps
-            predictions = self.forward_autoregressive(batch_x, self.prediction_steps)
-            # predictions: (batch, num_steps, 1)
-            # batch_y: (batch, num_steps)
+            # Use autocast for mixed precision
+            with torch.amp.autocast('cuda',enabled=use_amp):
+                # Auto-regressive training: predict multiple steps with teacher forcing
+                predictions = self.forward_autoregressive(
+                    batch_x,
+                    self.prediction_steps,
+                    self.target_feature_idx,
+                    ground_truth=batch_y,
+                    teacher_forcing_ratio=teacher_forcing_ratio
+                )
+                # predictions: (batch, num_steps, 1)
+                # batch_y: (batch, num_steps)
 
-            # Compute loss on ALL predictions (not just final)
-            predictions_flat = predictions.squeeze(-1)  # (batch, num_steps)
-            loss = criterion(predictions_flat, batch_y)
+                # Compute loss on ALL predictions (not just final)
+                predictions_flat = predictions.squeeze(-1)  # (batch, num_steps)
+                loss = criterion(predictions_flat, batch_y)
 
-            # Backward pass
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-            optimizer.step()
+            # Backward pass with gradient scaling
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+                optimizer.step()
 
             batch_loss = loss.item()
             total_loss += batch_loss
@@ -185,7 +234,8 @@ class BaseModel(ABC, nn.Module):
     def validate(
         self,
         val_loader: DataLoader,
-        criterion: nn.Module
+        criterion: nn.Module,
+        use_amp: bool = False
     ) -> float:
         """
         Validate the model.
@@ -193,6 +243,7 @@ class BaseModel(ABC, nn.Module):
         Args:
             val_loader: Validation data loader
             criterion: Loss function
+            use_amp: Use automatic mixed precision
 
         Returns:
             Average validation loss
@@ -206,14 +257,16 @@ class BaseModel(ABC, nn.Module):
                 batch_x = batch_x.to(self.device)
                 batch_y = batch_y.to(self.device)
 
-                # Auto-regressive validation: predict multiple steps
-                predictions = self.forward_autoregressive(batch_x, self.prediction_steps)
-                # predictions: (batch, num_steps, 1)
-                # batch_y: (batch, num_steps)
+                # Use autocast for mixed precision
+                with torch.amp.autocast('cuda',enabled=use_amp):
+                    # Auto-regressive validation: predict multiple steps
+                    predictions = self.forward_autoregressive(batch_x, self.prediction_steps, self.target_feature_idx)
+                    # predictions: (batch, num_steps, 1)
+                    # batch_y: (batch, num_steps)
 
-                # Compute loss on ALL predictions (not just final)
-                predictions_flat = predictions.squeeze(-1)  # (batch, num_steps)
-                loss = criterion(predictions_flat, batch_y)
+                    # Compute loss on ALL predictions (not just final)
+                    predictions_flat = predictions.squeeze(-1)  # (batch, num_steps)
+                    loss = criterion(predictions_flat, batch_y)
 
                 total_loss += loss.item()
                 n_batches += 1
@@ -229,7 +282,12 @@ class BaseModel(ABC, nn.Module):
         learning_rate: float = 0.0005,
         early_stopping_patience: int = 10,
         save_path: Optional[str] = None,
-        tensorboard_log_dir: Optional[str] = None
+        tensorboard_log_dir: Optional[str] = None,
+        val_frequency: int = 1,
+        use_amp: bool = True,
+        teacher_forcing_ratio: float = 0.5,
+        teacher_forcing_decay: float = 0.02,
+        weight_decay: float = 1e-5
     ) -> Dict[str, List[float]]:
         """
         Train the model.
@@ -242,13 +300,26 @@ class BaseModel(ABC, nn.Module):
             early_stopping_patience: Patience for early stopping
             save_path: Path to save best model
             tensorboard_log_dir: Directory for TensorBoard logs (optional)
+            val_frequency: Validate every N epochs (default: 1)
+            use_amp: Use Automatic Mixed Precision for 2x speedup (default: True)
+            teacher_forcing_ratio: Initial probability of using ground truth (0.0-1.0, default: 0.5)
+            teacher_forcing_decay: Amount to reduce TF ratio each epoch (default: 0.02)
+            weight_decay: L2 regularization weight decay (default: 1e-5)
 
         Returns:
             Dictionary with training history
         """
         logger.info(f"Training {self.__class__.__name__} on {self.device}")
-        logger.info(f"Epochs: {epochs}, LR: {learning_rate}")
+        logger.info(f"Epochs: {epochs}, LR: {learning_rate}, Weight Decay: {weight_decay}")
         logger.info(f"Auto-regressive prediction: {self.prediction_steps} steps")
+        logger.info(f"Teacher Forcing: Initial={teacher_forcing_ratio:.2f}, Decay={teacher_forcing_decay:.3f}")
+
+        # Check if AMP is available and enabled
+        use_amp = use_amp and torch.cuda.is_available() and self.device == 'cuda'
+        if use_amp:
+            logger.info(f"Mixed Precision Training: ENABLED (AMP with float16)")
+        else:
+            logger.info(f"Mixed Precision Training: DISABLED")
 
         # Initialize TensorBoard writer if log directory provided
         writer = None
@@ -258,7 +329,10 @@ class BaseModel(ABC, nn.Module):
             logger.info("View with: tensorboard --logdir=runs")
 
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+        # Initialize GradScaler for mixed precision training
+        scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
         # Add learning rate scheduler
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -270,11 +344,13 @@ class BaseModel(ABC, nn.Module):
         )
 
         patience_counter = 0
+        current_tf_ratio = teacher_forcing_ratio  # Track current teacher forcing ratio
 
         for epoch in range(epochs):
-            # Train
+            # Train with current teacher forcing ratio
             train_loss, batch_losses = self.train_epoch(
-                train_loader, criterion, optimizer, writer, epoch
+                train_loader, criterion, optimizer, writer, epoch, scaler, use_amp,
+                teacher_forcing_ratio=current_tf_ratio
             )
             self.train_losses.append(train_loss)
 
@@ -286,9 +362,15 @@ class BaseModel(ABC, nn.Module):
                                  (1 - self.ema_alpha) * self.train_losses_ema[-1])
             self.train_losses_ema.append(train_loss_ema)
 
-            # Validate
-            val_loss = self.validate(val_loader, criterion)
-            self.val_losses.append(val_loss)
+            # Validate (only every val_frequency epochs)
+            should_validate = (epoch % val_frequency == 0) or (epoch == epochs - 1)
+
+            if should_validate:
+                val_loss = self.validate(val_loader, criterion, use_amp)
+                self.val_losses.append(val_loss)
+            else:
+                # Use last validation loss for scheduler
+                val_loss = self.val_losses[-1] if self.val_losses else float('inf')
 
             self.epochs_trained += 1
 
@@ -302,8 +384,10 @@ class BaseModel(ABC, nn.Module):
             if writer:
                 writer.add_scalar('Loss/train', train_loss, epoch)
                 writer.add_scalar('Loss/train_ema', train_loss_ema, epoch)
-                writer.add_scalar('Loss/validation', val_loss, epoch)
+                if should_validate:
+                    writer.add_scalar('Loss/validation', val_loss, epoch)
                 writer.add_scalar('Learning_Rate', current_lr, epoch)
+                writer.add_scalar('Teacher_Forcing_Ratio', current_tf_ratio, epoch)
 
                 # Log training loss variance
                 batch_loss_variance = np.var(batch_losses)
@@ -327,14 +411,21 @@ class BaseModel(ABC, nn.Module):
                         if param.grad is not None:
                             writer.add_histogram(f'Gradients/{name}', param.grad, epoch)
 
-            logger.info(
-                f"Epoch {epoch+1}/{epochs} - "
-                f"Train Loss: {train_loss:.6f} (EMA: {train_loss_ema:.6f}), "
-                f"Val Loss: {val_loss:.6f}"
-            )
+            # Log training progress
+            if should_validate:
+                logger.info(
+                    f"Epoch {epoch+1}/{epochs} - "
+                    f"Train Loss: {train_loss:.6f} (EMA: {train_loss_ema:.6f}), "
+                    f"Val Loss: {val_loss:.6f}, TF Ratio: {current_tf_ratio:.3f}"
+                )
+            else:
+                logger.info(
+                    f"Epoch {epoch+1}/{epochs} - "
+                    f"Train Loss: {train_loss:.6f} (EMA: {train_loss_ema:.6f}), TF Ratio: {current_tf_ratio:.3f}"
+                )
 
-            # Early stopping
-            if val_loss < self.best_val_loss:
+            # Early stopping (only check on validation epochs)
+            if should_validate and val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 patience_counter = 0
 
@@ -353,7 +444,11 @@ class BaseModel(ABC, nn.Module):
                 logger.info(f"Early stopping triggered after {epoch+1} epochs")
                 break
 
+            # Decay teacher forcing ratio (scheduled sampling)
+            current_tf_ratio = max(0.0, current_tf_ratio - teacher_forcing_decay)
+
         logger.info(f"Training completed. Best val loss: {self.best_val_loss:.6f}")
+        logger.info(f"Final teacher forcing ratio: {current_tf_ratio:.3f}")
 
         # Close TensorBoard writer
         if writer:
@@ -389,7 +484,7 @@ class BaseModel(ABC, nn.Module):
                 batch_x = batch_x.to(self.device)
 
                 # Auto-regressive: predict full sequence
-                predictions = self.forward_autoregressive(batch_x, self.prediction_steps)
+                predictions = self.forward_autoregressive(batch_x, self.prediction_steps, self.target_feature_idx)
                 predictions = predictions.squeeze(-1)  # (batch, num_steps)
 
                 all_predictions.append(predictions.cpu().numpy())
@@ -453,6 +548,7 @@ class BaseModel(ABC, nn.Module):
             'num_layers': self.num_layers,
             'dropout': self.dropout,
             'prediction_steps': self.prediction_steps,
+            'target_feature_idx': self.target_feature_idx,
             'train_losses': self.train_losses,
             'train_losses_ema': self.train_losses_ema,
             'val_losses': self.val_losses,
@@ -473,7 +569,8 @@ class BaseModel(ABC, nn.Module):
             num_layers=checkpoint['num_layers'],
             dropout=checkpoint['dropout'],
             device=device,
-            prediction_steps=checkpoint.get('prediction_steps', 30)
+            prediction_steps=checkpoint.get('prediction_steps', 30),
+            target_feature_idx=checkpoint.get('target_feature_idx', 3)
         )
 
         model.load_state_dict(checkpoint['model_state_dict'])

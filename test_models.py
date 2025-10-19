@@ -126,10 +126,10 @@ def main():
         batch_size=16  # Smaller batch for testing
     )
 
-    train_loader, val_loader, test_loader, scaler = data_loader.prepare_data()
+    train_loader, val_loader, test_loader, scaler, target_scaler, target_idx = data_loader.prepare_data()
     input_size = data_loader.n_features
 
-    logger.info(f"✓ Data loaded (input_size={input_size})")
+    logger.info(f"✓ Data loaded (input_size={input_size}, target_idx={target_idx})")
 
     # Model configurations
     model_configs = {

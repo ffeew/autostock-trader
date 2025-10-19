@@ -40,6 +40,11 @@ def train_single_model(
     early_stopping_patience: int = 10,
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
     tensorboard_log_dir: str = None,
+    val_frequency: int = 1,
+    use_amp: bool = True,
+    teacher_forcing_ratio: float = 0.5,
+    teacher_forcing_decay: float = 0.02,
+    weight_decay: float = 1e-5,
     **model_kwargs
 ) -> Dict:
     """
@@ -55,6 +60,9 @@ def train_single_model(
         learning_rate: Learning rate
         early_stopping_patience: Early stopping patience
         device: Device to run on
+        teacher_forcing_ratio: Initial teacher forcing ratio (0.0-1.0)
+        teacher_forcing_decay: Teacher forcing decay per epoch
+        weight_decay: Weight decay for L2 regularization
         **model_kwargs: Additional model arguments
 
     Returns:
@@ -92,7 +100,12 @@ def train_single_model(
         learning_rate=learning_rate,
         early_stopping_patience=early_stopping_patience,
         save_path=save_path,
-        tensorboard_log_dir=tensorboard_log_dir
+        tensorboard_log_dir=tensorboard_log_dir,
+        val_frequency=val_frequency,
+        use_amp=use_amp,
+        teacher_forcing_ratio=teacher_forcing_ratio,
+        teacher_forcing_decay=teacher_forcing_decay,
+        weight_decay=weight_decay
     )
 
     logger.info(f"✓ Training completed for {model_family}-{model_type}")
@@ -119,7 +132,7 @@ def main():
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=32,
+        default=256,
         help='Batch size'
     )
     parser.add_argument(
@@ -149,8 +162,8 @@ def main():
     parser.add_argument(
         '--dropout',
         type=float,
-        default=0.2,
-        help='Dropout rate'
+        default=0.3,
+        help='Dropout rate (increased from 0.2 to 0.3 for better regularization)'
     )
     parser.add_argument(
         '--early-stopping',
@@ -168,6 +181,35 @@ def main():
         '--tensorboard',
         action='store_true',
         help='Enable TensorBoard logging for training visualization'
+    )
+    parser.add_argument(
+        '--val-frequency',
+        type=int,
+        default=1,
+        help='Validate every N epochs (default: 1, use 2-3 for faster training)'
+    )
+    parser.add_argument(
+        '--no-amp',
+        action='store_true',
+        help='Disable automatic mixed precision training'
+    )
+    parser.add_argument(
+        '--teacher-forcing',
+        type=float,
+        default=0.5,
+        help='Initial teacher forcing ratio (0.0-1.0, default: 0.5)'
+    )
+    parser.add_argument(
+        '--tf-decay',
+        type=float,
+        default=0.02,
+        help='Teacher forcing decay per epoch (default: 0.02)'
+    )
+    parser.add_argument(
+        '--weight-decay',
+        type=float,
+        default=1e-5,
+        help='Weight decay for L2 regularization (default: 1e-5)'
     )
 
     args = parser.parse_args()
@@ -214,11 +256,12 @@ def main():
         batch_size=args.batch_size
     )
 
-    train_loader, val_loader, test_loader, scaler, target_scaler = data_loader.prepare_data()
+    train_loader, val_loader, test_loader, scaler, target_scaler, target_feature_idx = data_loader.prepare_data()
     input_size = data_loader.n_features
 
     logger.info(f"✓ Data loaded successfully")
     logger.info(f"  Input features: {input_size}")
+    logger.info(f"  Target feature index: {target_feature_idx}")
     logger.info(f"  Sequence length: {args.sequence_length}")
     logger.info(f"  Batch size: {args.batch_size}")
     logger.info(f"  Target normalization: ENABLED (mean=0, std=1)\n")
@@ -264,14 +307,20 @@ def main():
         'hidden_size': args.hidden_size,
         'num_layers': args.num_layers,
         'dropout': args.dropout,
-        'prediction_steps': data_loader.prediction_steps
+        'prediction_steps': data_loader.prediction_steps,
+        'target_feature_idx': target_feature_idx
     }
 
-    # Log auto-regressive mode
-    logger.info(f"\n🔄 AUTO-REGRESSIVE TRAINING")
+    # Log auto-regressive mode and training improvements
+    logger.info(f"\n🔄 AUTO-REGRESSIVE TRAINING WITH TEACHER FORCING")
     logger.info(f"  Prediction steps: {data_loader.prediction_steps}")
     logger.info(f"  Training: Model will predict {data_loader.prediction_steps} steps iteratively")
-    logger.info(f"  Each prediction feeds back as input for next prediction\n")
+    logger.info(f"  Each prediction feeds back as input for next prediction")
+    logger.info(f"\n📊 TRAINING IMPROVEMENTS:")
+    logger.info(f"  ✓ Teacher Forcing: {args.teacher_forcing:.2f} (decays by {args.tf_decay:.3f}/epoch)")
+    logger.info(f"  ✓ Weight Decay (L2): {args.weight_decay:.0e}")
+    logger.info(f"  ✓ Dropout: {args.dropout:.2f}")
+    logger.info(f"  ✓ Scheduled Sampling: Enabled (prevents overfitting)\n")
 
     # Train each model
     results = {}
@@ -294,6 +343,11 @@ def main():
                 early_stopping_patience=args.early_stopping,
                 device=device,
                 tensorboard_log_dir=tb_log_dir,
+                val_frequency=args.val_frequency,
+                use_amp=not args.no_amp,
+                teacher_forcing_ratio=args.teacher_forcing,
+                teacher_forcing_decay=args.tf_decay,
+                weight_decay=args.weight_decay,
                 **model_kwargs
             )
 

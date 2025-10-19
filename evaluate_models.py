@@ -347,7 +347,7 @@ def main():
         batch_size=args.batch_size
     )
 
-    train_loader, val_loader, test_loader, scaler = data_loader.prepare_data()
+    train_loader, val_loader, test_loader, scaler, target_scaler, target_idx = data_loader.prepare_data()
 
     logger.info("✓ Data loaded\n")
 

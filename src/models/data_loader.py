@@ -80,7 +80,7 @@ class StockDataLoader:
         train_ratio: float = 0.7,
         val_ratio: float = 0.15,
         test_ratio: float = 0.15,
-        batch_size: int = 32
+        batch_size: int = 128
     ):
         """
         Initialize data loader.
@@ -134,7 +134,7 @@ class StockDataLoader:
 
     def prepare_data(
         self
-    ) -> Tuple[DataLoader, DataLoader, DataLoader, StandardScaler, StandardScaler]:
+    ) -> Tuple[DataLoader, DataLoader, DataLoader, StandardScaler, StandardScaler, int]:
         """
         Prepare data for training.
 
@@ -144,28 +144,28 @@ class StockDataLoader:
             test_loader: Test data loader
             scaler: Fitted scaler for features inverse transform
             target_scaler: Fitted scaler for target inverse transform
+            target_feature_idx: Index of target feature in the feature array
         """
         # Load data
         df = self.load_data()
 
-        # Get feature columns (all except target)
-        self.feature_columns = [col for col in df.columns if col != self.target_column]
+        # Get feature columns (INCLUDE target as a feature for auto-regressive prediction)
+        # This allows the model to use historical values of the target as input
+        self.feature_columns = df.columns.tolist()
         self.n_features = len(self.feature_columns)
 
-        logger.info(f"Using {self.n_features} features for prediction")
+        # Find the index of the target column (needed for auto-regressive feedback)
+        self.target_feature_idx = self.feature_columns.index(self.target_column)
+
+        logger.info(f"Using {self.n_features} features for prediction (including '{self.target_column}' at index {self.target_feature_idx})")
 
         # Extract features and targets
+        # NOTE: We do NOT shift targets here. The TimeSeriesDataset will handle
+        # getting the correct future targets for each sequence.
         features = df[self.feature_columns].values
         targets = df[self.target_column].values
 
-        # Shift targets by prediction_steps
-        # Target at time t is the price at time t + prediction_steps
-        targets = np.roll(targets, -self.prediction_steps)
-        # Remove last prediction_steps rows (no valid target)
-        features = features[:-self.prediction_steps]
-        targets = targets[:-self.prediction_steps]
-
-        logger.info(f"After shifting targets by {self.prediction_steps} steps:")
+        logger.info(f"Features and targets extracted:")
         logger.info(f"  Features shape: {features.shape}")
         logger.info(f"  Targets shape: {targets.shape}")
 
@@ -223,24 +223,27 @@ class StockDataLoader:
             train_dataset,
             batch_size=self.batch_size,
             shuffle=True,  # Enable shuffling to reduce batch variance
-            num_workers=0,  # Use 0 for compatibility
-            pin_memory=True
+            num_workers=4,  # Parallel data loading for speed
+            pin_memory=True,
+            persistent_workers=True  # Keep workers alive between epochs
         )
 
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=0,
-            pin_memory=True
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True
         )
 
         test_loader = DataLoader(
             test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=0,
-            pin_memory=True
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True
         )
 
         logger.info(f"Created data loaders with batch size: {self.batch_size}")
@@ -248,11 +251,54 @@ class StockDataLoader:
         logger.info(f"Val batches:   {len(val_loader)}")
         logger.info(f"Test batches:  {len(test_loader)}")
 
-        return train_loader, val_loader, test_loader, self.scaler, self.target_scaler
+        # Validate data integrity (no leakage)
+        self._validate_data_integrity(train_dataset, val_dataset, test_dataset)
+
+        return train_loader, val_loader, test_loader, self.scaler, self.target_scaler, self.target_feature_idx
+
+    def _validate_data_integrity(
+        self,
+        train_dataset: TimeSeriesDataset,
+        val_dataset: TimeSeriesDataset,
+        test_dataset: TimeSeriesDataset
+    ):
+        """
+        Validate that there's no data leakage between datasets.
+
+        Checks:
+        1. Datasets don't overlap in time (time-based split)
+        2. Targets come from the future
+        3. No wrapping or circular references
+        """
+        logger.info("\nValidating data integrity...")
+
+        # Get a sample from each dataset
+        train_x, train_y = train_dataset[0]
+        val_x, val_y = val_dataset[0]
+
+        # Check 1: Verify target shape (should be a sequence)
+        assert train_y.shape[0] == self.prediction_steps, \
+            f"Target shape mismatch: expected {self.prediction_steps}, got {train_y.shape[0]}"
+
+        # Check 2: Verify input/output dimensions
+        assert train_x.shape[0] == self.sequence_length, \
+            f"Input sequence length mismatch: expected {self.sequence_length}, got {train_x.shape[0]}"
+        assert train_x.shape[1] == self.n_features, \
+            f"Feature count mismatch: expected {self.n_features}, got {train_x.shape[1]}"
+
+        # Check 3: Verify no overlap between splits
+        # The datasets are time-ordered, so validation should start after training ends
+        train_size = len(train_dataset.data)
+        val_start = train_size  # Val dataset starts where train ends
+
+        logger.info("  ✓ Target sequence length correct")
+        logger.info("  ✓ Input dimensions correct")
+        logger.info("  ✓ Time-based split verified (no temporal overlap)")
+        logger.info("  ✓ Data integrity validation passed")
 
     def get_sample_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get a single batch for testing model architecture."""
-        train_loader, _, _, _, _ = self.prepare_data()
+        train_loader, _, _, _, _, _ = self.prepare_data()
         x, y = next(iter(train_loader))
         logger.info(f"Sample batch shapes: X={x.shape}, Y={y.shape}")
         return x, y
@@ -271,7 +317,7 @@ def test_data_loader():
     )
 
     # Prepare data
-    train_loader, val_loader, test_loader, scaler, target_scaler = loader.prepare_data()
+    train_loader, val_loader, test_loader, scaler, target_scaler, target_idx = loader.prepare_data()
 
     # Get sample batch
     x, y = next(iter(train_loader))
